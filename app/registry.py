@@ -36,13 +36,14 @@ def load_registry() -> List[AgentMetadata]:
             endpoint="https://example.com/summarizer/handle",
             healthcheck="https://example.com/summarizer/health",
         ),
-        AgentMetadata(
+       AgentMetadata(
             name="meeting_followup_agent",
-            description="Generates meeting follow-ups: action items, summaries, due dates.",
-            intents=["meeting.followup"],
+            description="ONLY for meeting transcripts: extracts action items (with assignees and deadlines), generates meeting summaries, identifies follow-up tasks. Use ONLY when query mentions meetings, transcripts, standups, action items, or follow-ups.",
+            intents=["meeting.followup", "meeting.process", "meeting.analyze", "action_items.extract"],
             type="http",
-            endpoint="https://example.com/meeting/handle",
-            healthcheck="https://example.com/meeting/health",
+            endpoint="https://meeting-minutes-backend-spm-production.up.railway.app/agents/supervisor/meeting-followup",
+            healthcheck="https://meeting-minutes-backend-spm-production.up.railway.app/agents/supervisor/health",
+            timeout_ms=30000,
         ),
         AgentMetadata(
             name="onboarding_buddy_agent",

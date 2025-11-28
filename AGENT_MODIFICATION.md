@@ -42,13 +42,14 @@ This guide explains how teams can add or update worker agents so the supervisor 
 - Avoid overlapping names/intents across agents to reduce tool-selection ambiguity.
 
 ## 4) Enable/replace simulation
-- `app/agent_caller.py::simulate_agent_output` contains stubs. Add a stub for new agents so the demo works offline, or remove the stub once a real endpoint is live.
+- The app does not ship with built-in simulation; `call_agent` makes real HTTP calls and returns structured errors if httpx is missing or the endpoint fails.
+- For offline demos or tests, monkeypatch `call_agent` to return an `AgentResponse` stub for your agent.
 - When going live, ensure `agent_meta.endpoint` or `command` is set and reachable; timeouts are honored per-agent.
 
 ## 5) Test the integration
 - Add tests that:
   - Call `/agents` to confirm the new entry is exposed.
-  - Exercise `/query` with a prompt that should route to the new intent and assert handshake shape and status handling.
+- Exercise `/api/query` with a prompt that should route to the new intent and assert handshake shape and status handling.
   - Validate error cases (non-200 HTTP, bad JSON) return `status=error` with `error.type` set.
 
 ## 6) Scope & safety considerations
@@ -59,6 +60,6 @@ This guide explains how teams can add or update worker agents so the supervisor 
 ## 7) Quick checklist
 - [ ] Registry entry added in `app/registry.py` (name, description, intents, type, endpoint/command, timeout).
 - [ ] Worker implements the handshake contract and echoes `request_id`.
-- [ ] Optional simulation added/updated in `simulate_agent_output` for offline demos.
-- [ ] Tests added/updated for `/agents` and `/query` routing to the new agent.
+- [ ] Optional test stub added via monkeypatching `call_agent` for offline demos.
+- [ ] Tests added/updated for `/agents` and `/api/query` routing to the new agent.
 - [ ] Any new config keys mirrored in `.env.example` (if applicable).

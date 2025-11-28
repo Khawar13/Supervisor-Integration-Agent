@@ -53,9 +53,9 @@ def load_registry() -> List[AgentMetadata]:
             healthcheck="https://example.com/onboarding/health",
         ),
         AgentMetadata(
-            name="knowledge_base_builder_agent",
+            name="KnowledgeBaseBuilderAgent",
             description="Builds or updates a knowledge base from discussions and notes.",
-            intents=["update_wiki"],
+            intents=["update_wiki", "knowledge.update"],
             type="http",
             endpoint="http://vps.zaim-abbasi.tech/knowledge-builder/message",
             healthcheck="http://vps.zaim-abbasi.tech/knowledge-builder/health",

@@ -274,6 +274,7 @@ def _render_page(title: str, script_body: str) -> HTMLResponse:
 def render_home() -> HTMLResponse:
     script = """
           const App = () => {
+            const initialConv = window.localStorage.getItem('conversationId') || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
             const [query, setQuery] = useState('Summarize our project status and flag any deadline risks.');
             const [debug, setDebug] = useState(false);
             const [agents, setAgents] = useState([]);
@@ -283,9 +284,11 @@ def render_home() -> HTMLResponse:
             const [status, setStatus] = useState('');
             const [error, setError] = useState(null);
             const [openIntermediate, setOpenIntermediate] = useState(false);
+            const [conversationId, setConversationId] = useState(initialConv);
 
             useEffect(() => {
               fetch('/api/agents').then((r) => r.json()).then(setAgents).catch(() => setAgents([]));
+              window.localStorage.setItem('conversationId', initialConv);
             }, []);
 
             const handleSubmit = async () => {
@@ -299,7 +302,7 @@ def render_home() -> HTMLResponse:
                 const resp = await fetch('/api/query', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ query, user_id: null, options: { debug } })
+                  body: JSON.stringify({ query, user_id: null, conversation_id: conversationId, options: { debug } })
                 });
                 const data = await resp.json();
                 setStatus('');

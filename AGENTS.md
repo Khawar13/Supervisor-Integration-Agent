@@ -8,7 +8,7 @@ This repo hosts a FastAPI + React demo where a supervisor LLM orchestrates worke
   - `server.py`: FastAPI wiring and routes.
   - `registry.py`: Agent definitions and lookup helpers.
   - `planner.py`: LLM planner with fallback plan.
-  - `agent_caller.py`: Handshake builder and simulated/HTTP agent calls.
+  - `agent_caller.py`: Handshake builder and HTTP agent calls (returns structured errors if endpoints/httpx fail).
   - `executor.py`: Plan execution and input resolution.
   - `answer.py`: Final answer synthesis (LLM + fallback).
   - `models.py`: Shared Pydantic schemas.
@@ -26,7 +26,7 @@ This repo hosts a FastAPI + React demo where a supervisor LLM orchestrates worke
 - UI uses React (CDN + Babel). Keep components small; co-locate UI tweaks in `web.py`.
 
 ## Testing Guidelines
-- Add unit tests for planner fallbacks, registry lookups, and `/query` happy-path/error cases.
+- Add unit tests for planner fallbacks, registry lookups, and `/api/query` happy-path/error cases.
 - When stubbing agents, assert handshake shape (request_id, status, output/error).
 - Include at least one test that exercises the debug payload structure (`used_agents`, `intermediate_results`).
 

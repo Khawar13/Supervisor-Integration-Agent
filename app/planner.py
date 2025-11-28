@@ -1,25 +1,156 @@
 """
-LLM-based planner that selects which agents to call. Includes a deterministic
-fallback so the app works without OpenAI credentials.
+LLM-based planner that selects which agents to call. Includes deterministic
+heuristics, strict validation of LLM output, and an out-of-scope guard to avoid
+calling agents for unsupported requests.
 """
 from __future__ import annotations
 
 import json
 import os
-from typing import List
+from typing import List, Optional
+import logging
 
 try:
     from openai import OpenAI  # type: ignore
 except ImportError:
-    OpenAI = None  # library optional for the demo
+    OpenAI = None  # optional; planner will fall back to heuristics
 
-from .models import Plan, PlanStep
+from .models import AgentMetadata, Plan, PlanStep
+
+logger = logging.getLogger(__name__)
 
 
-def plan_tools_with_llm(query: str, registry: List) -> Plan:
-    """Ask an LLM to propose a tool plan; fall back to a safe default."""
+def _validate_steps(raw_steps: List[dict], registry: List[AgentMetadata]) -> List[PlanStep]:
+    """Validate LLM-produced steps against the registry and schema."""
+    valid_steps: List[PlanStep] = []
+    registry_map = {a.name: a for a in registry}
 
-    if OpenAI is None or os.getenv("OPENAI_API_KEY") is None:
+    for step in raw_steps:
+        try:
+            step_obj = PlanStep(**step)
+        except Exception as exc:  # invalid shape or missing fields
+            logger.warning("Planner step rejected (schema): %s", exc)
+            continue
+
+        agent_meta = registry_map.get(step_obj.agent)
+        if not agent_meta:
+            logger.warning("Planner step rejected (unknown agent): %s", step_obj.agent)
+            continue
+        if step_obj.intent not in agent_meta.intents:
+            logger.warning(
+                "Planner step rejected (intent mismatch): agent=%s intent=%s allowed=%s",
+                step_obj.agent,
+                step_obj.intent,
+                agent_meta.intents,
+            )
+            continue
+        valid_steps.append(step_obj)
+    return valid_steps
+
+
+def _get_openrouter_client():
+    """Return a configured OpenRouter client or None if unavailable."""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if OpenAI is None or not api_key:
+        return None
+    try:
+        return OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+        )
+    except Exception as exc:
+        logger.error("Failed to configure OpenRouter client: %s", exc)
+        return None
+
+
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash-lite")
+
+
+def plan_tools_with_llm(query: str, registry: List[AgentMetadata], history: Optional[List] = None) -> Plan:
+    """Ask an LLM to propose a tool plan; fall back to a safe default or out-of-scope."""
+
+    # Heuristic routing for clear intents to reduce misclassification and avoid
+    # calling unrelated agents. If none of the heuristics match and the LLM is
+    # unavailable, we declare out of scope (no steps).
+    lower_q = query.lower()
+    if any(keyword in lower_q for keyword in ["knowledge base", "knowledgebase", "kb "]):
+        return Plan(
+            steps=[
+                PlanStep(
+                    step_id=0,
+                    agent="KnowledgeBaseBuilderAgent",
+                    intent="update_wiki",
+                    input_source="user_query",
+                )
+            ]
+        )
+    if any(keyword in lower_q for keyword in ["deadline", "due date", "risk", "slip"]):
+        return Plan(
+            steps=[
+                PlanStep(
+                    step_id=0,
+                    agent="deadline_guardian_agent",
+                    intent="deadline.monitor",
+                    input_source="user_query",
+                )
+            ]
+        )
+    if any(keyword in lower_q for keyword in ["follow-up", "followup", "action item", "minutes"]):
+        return Plan(
+            steps=[
+                PlanStep(
+                    step_id=0,
+                    agent="meeting_followup_agent",
+                    intent="meeting.followup",
+                    input_source="user_query",
+                )
+            ]
+        )
+    if any(keyword in lower_q for keyword in ["onboard", "onboarding", "new hire"]):
+        return Plan(
+            steps=[
+                PlanStep(
+                    step_id=0,
+                    agent="onboarding_buddy_agent",
+                    intent="onboarding.guide",
+                    input_source="user_query",
+                )
+            ]
+        )
+    if any(keyword in lower_q for keyword in ["dependency", "depends on", "blocked by"]):
+        return Plan(
+            steps=[
+                PlanStep(
+                    step_id=0,
+                    agent="task_dependency_agent",
+                    intent="tasks.dependencies",
+                    input_source="user_query",
+                )
+            ]
+        )
+    if any(keyword in lower_q for keyword in ["email", "inbox", "priority"]):
+        return Plan(
+            steps=[
+                PlanStep(
+                    step_id=0,
+                    agent="email_priority_agent",
+                    intent="email.prioritize",
+                    input_source="user_query",
+                )
+            ]
+        )
+    if any(keyword in lower_q for keyword in ["progress", "goal", "task status"]):
+        return Plan(
+            steps=[
+                PlanStep(
+                    step_id=0,
+                    agent="progress_accountability_agent",
+                    intent="progress.track",
+                    input_source="user_query",
+                )
+            ]
+        )
+    if any(keyword in lower_q for keyword in ["summary", "summarize", "condense"]):
         return Plan(
             steps=[
                 PlanStep(
@@ -31,7 +162,10 @@ def plan_tools_with_llm(query: str, registry: List) -> Plan:
             ]
         )
 
-    client = OpenAI()
+    client = _get_openrouter_client()
+    if client is None:
+        # No LLM available and heuristics could not map the query: out of scope.
+        return Plan(steps=[])
     agents_summary = [
         {"name": a.name, "description": a.description, "intents": a.intents}
         for a in registry
@@ -40,37 +174,37 @@ def plan_tools_with_llm(query: str, registry: List) -> Plan:
     system_prompt = (
         "You are a planner that selects worker agents to satisfy a user query. "
         'Return ONLY JSON with the shape {"steps":[{"step_id":0,"agent":...,"intent":...,"input_source":...},...]}. '
-        "input_source is either 'user_query' or 'step:X.output.result'."
+        "input_source is either 'user_query' or 'step:X.output.result'. "
+        "If the request is outside the available agents' scope, return {\"steps\":[]} (empty list) to signal out-of-scope. "
+        "Strictly match agent intents to the user need; avoid generic summarizers unless summarization is explicitly requested."
     )
-    user_prompt = json.dumps(
-        {
-            "user_query": query,
-            "available_agents": agents_summary,
-        },
-        indent=2,
-    )
+    user_payload = {
+        "user_query": query,
+        "available_agents": agents_summary,
+    }
+    if history:
+        user_payload["recent_history"] = history
+    user_prompt = json.dumps(user_payload, indent=2)
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0,
-    )
+    try:
+        response = client.chat.completions.create(
+            model=OPENROUTER_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        content = response.choices[0].message.content.strip() if response.choices else ""
+    except Exception as exc:
+        logger.error("Planner LLM call failed: %s", exc)
+        return Plan(steps=[])
 
-    content = response.choices[0].message.content.strip()
+    logger.info("Planner LLM raw response: %s", content)
     try:
         plan_json = json.loads(content)
-        return Plan(**plan_json)
-    except Exception:
-        return Plan(
-            steps=[
-                PlanStep(
-                    step_id=0,
-                    agent="document_summarizer_agent",
-                    intent="summary.create",
-                    input_source="user_query",
-                )
-            ]
-        )
+        raw_steps = plan_json.get("steps", [])
+        validated = _validate_steps(raw_steps, registry)
+        return Plan(steps=validated)
+    except Exception as exc:
+        logger.error("Planner failed to parse/validate LLM output: %s", exc)
+        return Plan(steps=[])

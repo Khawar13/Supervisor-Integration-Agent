@@ -21,6 +21,7 @@ class FrontendRequest(BaseModel):
 
     query: str
     user_id: Optional[str] = None
+    conversation_id: Optional[str] = None
     options: FrontendOptions = Field(default_factory=FrontendOptions)
 
 

@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from app.server import app
 from app import server as server_module
-from app.models import Plan, PlanStep
+from app import executor as executor_module
+from app.models import AgentResponse, OutputModel, Plan, PlanStep
 
 
 client = TestClient(app)
@@ -18,7 +19,7 @@ def test_agents_endpoint_includes_kb_agent():
     resp = client.get("/agents")
     assert resp.status_code == 200
     agents = resp.json()
-    assert any(a["name"] == "knowledge_base_builder_agent" for a in agents)
+    assert any(a["name"] == "KnowledgeBaseBuilderAgent" for a in agents)
 
 
 def test_query_routes_to_kb_agent(monkeypatch):
@@ -32,8 +33,8 @@ def test_query_routes_to_kb_agent(monkeypatch):
             steps=[
                 PlanStep(
                     step_id=0,
-                    agent="knowledge_base_builder_agent",
-                    intent="knowledge.update",
+                    agent="KnowledgeBaseBuilderAgent",
+                    intent="update_wiki",
                     input_source="user_query",
                 )
             ]
@@ -47,13 +48,23 @@ def test_query_routes_to_kb_agent(monkeypatch):
         "options": {"debug": True},
     }
 
+    async def fake_call_agent(agent_meta, intent, text, context):
+        return AgentResponse(
+            request_id="test",
+            agent_name=agent_meta.name,
+            status="success",
+            output=OutputModel(result="KB updated", confidence=0.95, details="mock"),
+        )
+
+    monkeypatch.setattr(executor_module, "call_agent", fake_call_agent)
+
     resp = client.post("/query", json=payload)
     assert resp.status_code == 200
     data = resp.json()
 
     assert data["used_agents"], "Expected at least one agent call"
     first = data["used_agents"][0]
-    assert first["name"] == "knowledge_base_builder_agent"
+    assert first["name"] == "KnowledgeBaseBuilderAgent"
     assert first["status"] == "success"
 
     # Since we rely on simulated output, the answer should include the stubbed result text.

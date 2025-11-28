@@ -5,4 +5,4 @@
 - Documented repository practices in `AGENTS.md` to reflect the new structure and React UI, including dev commands and style expectations.
 - Initialized git, added `.gitignore`, merged remote history (README additions) with `--allow-unrelated-histories`, and pushed to `main`.
 - Updated `origin` to `https://github.com/Huzaifa-2669/Supervisor-Integration-Agent.git`.
-- Kept simulated agent responses and planner/answer LLM fallbacks so the app runs without external services or OpenAI credentials.
+- Kept planner/answer LLM fallbacks so the app runs without OpenAI credentials; agent calls attempt real HTTP and surface structured errors when endpoints/httpx are missing, with tests able to monkeypatch for offline runs.

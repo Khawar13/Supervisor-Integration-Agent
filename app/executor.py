@@ -35,55 +35,7 @@ def resolve_input(input_source: str, user_query: str, step_outputs: Dict[int, Ag
     return user_query
 
 
-async def call_agent_with_trigger(
-    agent_meta: AgentMetadata,
-    intent: str,
-    context: Dict[str, Any],
-) -> AgentResponse:
-    """
-    Call TDA with a database trigger signal.
-    TDA will retrieve tasks from MongoDB automatically.
-    """
-    request_id = str(uuid.uuid4())
-    
-    # Build handshake with trigger signal
-    handshake = AgentRequest(
-        request_id=request_id,
-        agent_name=agent_meta.name,
-        intent=intent,
-        input={"trigger": "database_update"},  # Signal to retrieve from DB
-        context=context,
-    )
 
-    if agent_meta.type == "http" and agent_meta.endpoint and httpx is not None:
-        try:
-            async with httpx.AsyncClient(timeout=agent_meta.timeout_ms / 1000) as client:
-                resp = await client.post(agent_meta.endpoint, json=handshake.dict())
-                if resp.status_code != 200:
-                    return AgentResponse(
-                        request_id=request_id,
-                        agent_name=agent_meta.name,
-                        status="error",
-                        error=ErrorModel(
-                            type="http_error",
-                            message=f"HTTP {resp.status_code} calling {agent_meta.endpoint}",
-                        ),
-                    )
-                return AgentResponse(**resp.json())
-        except Exception as exc:
-            return AgentResponse(
-                request_id=request_id,
-                agent_name=agent_meta.name,
-                status="error",
-                error=ErrorModel(type="network_error", message=str(exc)),
-            )
-    else:
-        return AgentResponse(
-            request_id=request_id,
-            agent_name=agent_meta.name,
-            status="error",
-            error=ErrorModel(type="config_error", message="Agent endpoint not configured"),
-        )
 
 
 async def execute_plan(
@@ -112,10 +64,12 @@ async def execute_plan(
             try:
                 tda_meta = find_agent_by_name("task_dependency_agent", registry)
                 # Call TDA with database trigger - it will retrieve tasks from MongoDB
-                tda_response = await call_agent_with_trigger(
+                tda_response = await call_agent(
                     tda_meta,
                     "task.resolve_dependencies",
-                    context
+                    "",  # Empty text since TDA uses trigger
+                    context,
+                    custom_input={"trigger": "database_update"}  # Signal to retrieve from DB
                 )
                 # Add TDA to outputs with next step_id
                 next_step_id = max(step_outputs.keys()) + 1 if step_outputs else 0

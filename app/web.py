@@ -38,7 +38,7 @@ STYLES = """
           .shell {
             max-width: 1100px;
             margin: 0 auto;
-            padding: 48px 24px 100px;
+            padding: 48px 12px 100px;
             position: relative;
           }
           /* Ambient sparkles */
@@ -77,6 +77,50 @@ STYLES = """
             padding: 20px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.35);
           }
+          .chat {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+          }
+          .chat-feed {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 14px;
+            min-height: 320px;
+            max-height: 520px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+          }
+          .msg {
+            max-width: 80%;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+            white-space: pre-wrap;
+          }
+          .msg.user {
+            align-self: flex-end;
+            background: linear-gradient(120deg, #22d3ee33, #22c55e33);
+            border-color: rgba(34,211,238,0.35);
+          }
+          .msg.assistant {
+            align-self: flex-start;
+          }
+          .input-bar {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 12px;
+            align-items: center;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 10px;
+          }
           textarea {
             width: 100%;
             min-height: 140px;
@@ -91,7 +135,26 @@ STYLES = """
           .controls {
             display: flex; align-items: center; gap: 14px; margin-top: 12px; flex-wrap: wrap;
           }
-          .checkbox { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: 14px; }
+          .input-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            color: var(--muted);
+            font-size: 14px;
+          }
+          .switch { position: relative; display: inline-flex; align-items: center; gap: 10px; cursor: pointer; color: var(--muted); font-size: 14px; }
+          .switch input { display: none; }
+          .slider { position: relative; width: 44px; height: 24px; background: var(--card); border-radius: 12px; border: 1px solid var(--border); transition: background 120ms ease, border 120ms ease; }
+          .slider::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: var(--muted); transition: transform 160ms ease, background 160ms ease; box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+          .switch input:checked + .slider { background: linear-gradient(120deg, #22d3ee, #22c55e); border-color: rgba(34,211,238,0.35); }
+          .switch input:checked + .slider::after { transform: translateX(20px); background: #0b1220; }
+          .file-input { background: var(--panel); border: 1px solid var(--border); padding: 10px 12px; border-radius: 12px; color: var(--text); cursor: pointer; transition: border 120ms ease, transform 120ms ease; }
+          .file-input:hover { border-color: var(--accent); transform: translateY(-1px); }
+          .file-input::-webkit-file-upload-button { background: linear-gradient(120deg, #22d3ee, #22c55e); border: none; border-radius: 999px; padding: 8px 12px; color: #0b1220; font-weight: 700; cursor: pointer; }
+          .file-meta { color: var(--muted); font-size: 13px; }
+          .file-trigger { background: var(--panel); border: 1px solid var(--border); padding: 10px 12px; border-radius: 12px; color: var(--text); cursor: pointer; transition: border 120ms ease, transform 120ms ease; text-align: center; }
+          .file-trigger:hover { border-color: var(--accent); transform: translateY(-1px); }
           button.primary {
             background: linear-gradient(120deg, #22d3ee, #22c55e);
             color: #0b1220;
@@ -383,104 +446,83 @@ def render_home() -> HTMLResponse:
     script = """
           const App = () => {
             const initialConv = window.localStorage.getItem('conversationId') || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
-            const [query, setQuery] = useState('Summarize our project status and flag any deadline risks.');
+            const [conversationId, setConversationId] = useState(initialConv);
+            const [messages, setMessages] = useState([
+              { role: 'assistant', content: 'Hi there! Ask a question and I will plan which agents to call.' }
+            ]);
+            const [input, setInput] = useState('Summarize our project status and flag any deadline risks.');
             const [debug, setDebug] = useState(false);
             const [agents, setAgents] = useState([]);
-            const [answer, setAnswer] = useState('');
             const [usedAgents, setUsedAgents] = useState([]);
             const [intermediate, setIntermediate] = useState({});
             const [status, setStatus] = useState('');
-            
-            // Function to render markdown
+            const [error, setError] = useState(null);
+            const [openIntermediate, setOpenIntermediate] = useState(false);
+            const [fileName, setFileName] = useState('');
+            const [uploadedFiles, setUploadedFiles] = useState([]);
+            const chatRef = React.useRef(null);
+            const fileInputRef = React.useRef(null);
+
+            useEffect(() => {
+              if (chatRef.current) {
+                chatRef.current.scrollTop = chatRef.current.scrollHeight;
+              }
+            }, [messages, status]);
+
             const renderMarkdown = (text) => {
               if (!text || typeof text !== 'string') return text;
               try {
-                // Use marked.js to convert markdown to HTML
                 if (typeof marked !== 'undefined') {
                   const html = marked.parse(text);
                   return <div className="markdown-content" dangerouslySetInnerHTML={{ __html: html }} />;
                 }
-                // Fallback if marked is not loaded
                 return text;
-              } catch (e) {
+              } catch {
                 return text;
               }
             };
-            const [error, setError] = useState(null);
-            const [openIntermediate, setOpenIntermediate] = useState(false);
-            const [conversationId, setConversationId] = useState(initialConv);
-            const [fileName, setFileName] = useState('');
-            const [uploadedFiles, setUploadedFiles] = useState([]); // Track uploaded files separately
 
             useEffect(() => {
               fetch('/api/agents').then((r) => r.json()).then(setAgents).catch(() => setAgents([]));
               window.localStorage.setItem('conversationId', initialConv);
             }, []);
 
-            const handleSubmit = async () => {
-              if (!query.trim()) return;
-              setStatus('Working...');
-              setAnswer('');
+            const resetConversation = () => {
+              const next = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+              setConversationId(next);
+              window.localStorage.setItem('conversationId', next);
+              setMessages([{ role: 'assistant', content: 'New chat started. How can I help?' }]);
               setUsedAgents([]);
               setIntermediate({});
               setError(null);
-              
-              // Store files to send (will clear after submission)
-              const filesToSend = [...uploadedFiles];
-              
-              // Use files stored for this submission
-              let fileUploads = [...filesToSend];
-              
-              // Fallback: Also check for file markers in query (for backward compatibility)
-              const filePattern = /\[FILE_UPLOAD:(.+?):([^:]+):([^\]]+)\]/g;
-              let match;
-              let cleanQuery = query;
-              
-              while ((match = filePattern.exec(query)) !== null) {
-                const dataUrl = match[1];
-                const filename = match[2];
-                const mimeType = match[3];
-                
-                // Extract base64 data from data URL
-                let base64Data = '';
-                if (dataUrl.includes('base64,')) {
-                  base64Data = dataUrl.split('base64,')[1];
-                } else if (dataUrl.includes(',')) {
-                  base64Data = dataUrl.split(',')[1];
-                } else {
-                  base64Data = dataUrl;
-                }
-                
-                // Validate: skip empty or invalid uploads
-                if (base64Data && base64Data.length > 0 && filename) {
-                  // Only add if not already in uploadedFiles
-                  const exists = fileUploads.some(fu => fu.filename === filename);
-                  if (!exists) {
-                    fileUploads.push({
-                      base64_data: base64Data,
-                      filename: filename,
-                      mime_type: mimeType
-                    });
-                  }
-                  
-                  // Remove marker from query
-                  cleanQuery = cleanQuery.replace(match[0], `[Uploaded file: ${filename}]`);
-                }
-              }
-              
+              setFileName('');
+              setUploadedFiles([]);
+            };
+
+            const handleSend = async () => {
+              if (!input.trim()) return;
+              const userMsg = { role: 'user', content: input };
+              setMessages((prev) => [...prev, userMsg]);
+              setInput('');
+              setStatus('Working...');
+              setError(null);
+              setUsedAgents([]);
+              setIntermediate({});
+
+              const fileUploads = [...uploadedFiles];
+
               try {
                 const requestBody = {
-                  query: cleanQuery,
+                  query: userMsg.content,
                   user_id: null,
                   conversation_id: conversationId,
                   options: { debug }
                 };
-                
-                // Add file uploads if any (preferred: structured field)
+
                 if (fileUploads.length > 0) {
                   requestBody.file_uploads = fileUploads;
                 }
-                
+
                 const resp = await fetch('/api/query', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -488,36 +530,17 @@ def render_home() -> HTMLResponse:
                 });
                 const data = await resp.json();
                 setStatus('');
-                setAnswer(data.answer || '');
                 setUsedAgents(data.used_agents || []);
                 setIntermediate(data.intermediate_results || {});
                 setError(data.error);
-                
-                // Clear uploaded files after successful submission
-                if (filesToSend.length > 0) {
-                  setUploadedFiles([]);
-                  setFileName('');
-                }
-                // confetti
-                try {
-                  const s = document.createElement('span');
-                  s.style.position='fixed'; s.style.left='50%'; s.style.top='12%';
-                  s.style.transform='translateX(-50%)';
-                  s.style.filter='drop-shadow(0 0 10px rgba(34,211,238,.6))';
-                  s.textContent='✨';
-                  document.body.appendChild(s);
-                  setTimeout(() => s.remove(), 700);
-                } catch {}
+                setMessages((prev) => [...prev, { role: 'assistant', content: data.answer || 'No answer produced.' }]);
+                setUploadedFiles([]);
+                setFileName('');
               } catch (err) {
                 setStatus('');
                 setError({ message: 'Network error', type: 'network_error' });
+                setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, I could not reach the server.' }]);
               }
-            };
-
-            const handleCopy = async () => {
-              try {
-                await navigator.clipboard.writeText(answer || '');
-              } catch {}
             };
 
             const handleFileUpload = (e) => {
@@ -527,7 +550,6 @@ def render_home() -> HTMLResponse:
               setFileName(file.name);
               setStatus('Reading file...');
               
-              // Determine file type and MIME type
               const isTextFile = file.type.startsWith('text/') || 
                                  file.name.endsWith('.txt') || 
                                  file.name.endsWith('.md') || 
@@ -549,43 +571,46 @@ def render_home() -> HTMLResponse:
               };
               
               if (isTextFile) {
-                // Read text files as text and embed directly
                 reader.onload = (event) => {
                   const fileContent = event.target.result;
-                  if (!query.trim() || query === 'Summarize our project status and flag any deadline risks.') {
-                    setQuery(`Summarize this document:\n\n${fileContent}`);
+                  if (!input.trim() || input === 'Summarize our project status and flag any deadline risks.') {
+                    setInput(`Summarize this document:
+
+${fileContent}`);
                   } else {
-                    setQuery(`${query}\n\n--- Document Content ---\n\n${fileContent}`);
+                    setInput(`${input}
+
+--- Document Content ---
+
+${fileContent}`);
                   }
                   setStatus('');
-                  setUploadedFiles([]); // Text files are embedded, no separate upload needed
+                  setUploadedFiles([]);
                 };
                 reader.readAsText(file);
               } else if (isPDF || isDOCX) {
-                // For PDF/DOCX, convert to base64 and track separately
                 reader.onload = (event) => {
                   const dataUrl = event.target.result;
-                  const base64 = dataUrl.split(',')[1]; // Remove data URL prefix
+                  const base64 = dataUrl.split(',')[1];
                   const mimeType = isPDF ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
                   
-                  // Store file separately for structured upload
                   setUploadedFiles([{
                     base64_data: base64,
                     filename: file.name,
                     mime_type: mimeType
                   }]);
                   
-                  // Update query to indicate file is attached
-                  if (!query.trim() || query === 'Summarize our project status and flag any deadline risks.') {
-                    setQuery('Summarize the attached document');
-                  } else if (!query.toLowerCase().includes('summarize') && !query.toLowerCase().includes('document')) {
-                    setQuery(`${query}\n\nSummarize the attached document`);
+                  if (!input.trim() || input === 'Summarize our project status and flag any deadline risks.') {
+                    setInput('Summarize the attached document');
+                  } else if (!input.toLowerCase().includes('summarize') && !input.toLowerCase().includes('document')) {
+                    setInput(`${input}
+
+Summarize the attached document`);
                   }
                   setStatus('');
                 };
                 reader.readAsDataURL(file);
               } else {
-                // For other binary files, show error
                 setStatus('');
                 setError({ message: `File type ${file.type || 'unknown'} not supported. Supported: text files, PDF, DOCX.`, type: 'file_error' });
                 setFileName('');
@@ -593,75 +618,55 @@ def render_home() -> HTMLResponse:
               }
             };
 
-            // Compute orbit positions (percent-based radii to keep within bounds)
-            const orbitPositions = useMemo(() => {
-              const rings = [34, 42, 48]; // percent radii from center for three orbits
-              const items = [];
-              const count = Math.max(agents.length, 6);
-              agents.forEach((agent, i) => {
-                const ringIndex = i % rings.length;
-                const angle = (i * (360 / count)) % 360;
-                const r = rings[ringIndex];
-                const x = 50 + Math.cos(angle * Math.PI/180) * r;
-                const y = 50 + Math.sin(angle * Math.PI/180) * r;
-                // clamp to avoid clipping due to card width/height
-                const clampedX = Math.min(92, Math.max(8, x));
-                const clampedY = Math.min(92, Math.max(8, y));
-                items.push({ agent, style: { left: `${clampedX}%`, top: `${clampedY}%` } });
-              });
-              return items;
-            }, [agents]);
-
             return (
               <div className="panel">
                 <div className="hero">
                   <div className="badge">Supervisor · Multi-Agent Orchestrator</div>
                   <div>
-                    <h1 style={{ margin: '4px 0 6px' }}>Ask once. Let the supervisor plan the rest.</h1>
-                    <p className="small">The LLM planner reads your request, selects the right worker agents, and merges their answers.</p>
+                    <h1 style={{ margin: '4px 0 6px' }}>Chat with the supervisor.</h1>
+                    <p className="small">Send messages, see responses, and inspect which worker agents were used per turn.</p>
                   </div>
                 </div>
 
-                <div>
-                  <label className="section-title">Your request</label>
-                  <textarea value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type your question here or upload a file..." />
-                  <div style={{ marginTop: 8, marginBottom: 8 }}>
-                    <label style={{ display: 'inline-block', cursor: 'pointer', fontSize: '13px', color: 'var(--muted)' }}>
-                      <input type="file" onChange={handleFileUpload} accept=".txt,.md,.json,.csv,.log,.pdf,.docx,text/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display: 'none' }} />
-                      <span style={{ textDecoration: 'underline' }}>📎 Upload file (TXT, MD, PDF, DOCX)</span>
-                      {fileName && <span style={{ marginLeft: 8, color: 'var(--accent)' }}>({fileName})</span>}
+                <div className="chat">
+                  <div className="input-controls">
+                    <label className="switch">
+                      <input type="checkbox" checked={debug} onChange={(e) => setDebug(e.target.checked)} />
+                      <span className="slider"></span>
+                      <span>Show debug</span>
                     </label>
+                    <span>Conversation: {conversationId.slice(0, 8)}…</span>
+                    <button className="primary" style={{ padding: '8px 12px' }} onClick={resetConversation}>New chat</button>
                   </div>
-                  <div className="controls">
-                    <label className="checkbox">
-                      <input type="checkbox" checked={debug} onChange={(e) => setDebug(e.target.checked)} /> Show debug
-                    </label>
-                    <button className="primary" onClick={handleSubmit}>Submit</button>
-                    {status && <span className="status"><span className="status-dot"></span>{status}</span>}
-                  </div>
-                </div>
 
-                <div style={{ marginTop: 18, position: 'relative' }}>
-                  <label className="section-title">Answer</label>
-                  <div className="result-box">
-                    <button className="copy-btn" onClick={handleCopy}>Copy</button>
-                    {answer ? renderMarkdown(answer) : (status ? '…thinking…' : 'No answer yet.')}
+                  <div className="chat-feed" id="chat-feed" ref={chatRef}>
+                    {messages.map((m, idx) => (
+                      <div key={idx} className={`msg ${m.role}`}>
+                        <strong style={{ display: 'block', marginBottom: 6, color: m.role === 'user' ? '#22d3ee' : '#cbd5e1' }}>{m.role === 'user' ? 'You' : 'Supervisor'}</strong>
+                        {m.role === 'assistant' ? renderMarkdown(m.content) : m.content}
+                      </div>
+                    ))}
+                    {status && (
+                      <div className="msg assistant" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <span className="status-dot"></span> Working on your request...
+                      </div>
+                    )}
                   </div>
-                  {error && <div className="small" style={{ color: '#f87171', marginTop: 8 }}>Error: {error.message}</div>}
+
+                  <div className="input-bar">
+                    <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type your message..." rows={3} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <button className="primary" onClick={handleSend} style={{ padding: '12px 18px' }}>Send</button>
+                      <input ref={fileInputRef} type="file" style={{ display: 'none' }} accept=".txt,.md,.json,.csv,.log,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleFileUpload} />
+                      <button type="button" className="file-trigger" onClick={() => fileInputRef.current && fileInputRef.current.click()}>Choose file</button>
+                      {fileName && <span className="file-meta">Attached: {fileName}</span>}
+                    </div>
+                  </div>
+                  {error && <div className="small" style={{ color: '#f87171' }}>Error: {error.message}</div>}
                 </div>
 
                 <div style={{ marginTop: 18 }}>
-                  <label className="section-title">Worker agents</label>
-                  <p className="small">Visualized in orbit around the supervisor. Hover to see details.</p>
-                  <div className="orbit">
-                    <div className="sun">Supervisor</div>
-                    <div className="ring r1"></div>
-                    <div className="ring r2"></div>
-                    <div className="ring r3"></div>
-                    {orbitPositions.map(({ agent, style }) => (
-                      <PlanetCard key={agent.name} agent={agent} style={{ position: 'absolute', transform: 'translate(-50%, -50%)', ...style }} />
-                    ))}
-                  </div>
+                  <a href="/agents" style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>View all agents →</a>
                 </div>
 
                 {debug && (
@@ -680,7 +685,6 @@ def render_home() -> HTMLResponse:
                       <div style={{ marginTop: 14 }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <label className="section-title" style={{ margin: 0 }}>Intermediate results</label>
-                          <button className="copy-btn" onClick={() => navigator.clipboard.writeText(JSON.stringify(intermediate, null, 2))}>Copy JSON</button>
                         </div>
                         <div style={{ marginTop: 8 }}>
                           <button className="primary" style={{ padding: '8px 12px', fontWeight: 600 }} onClick={() => setOpenIntermediate(v => !v)}>
@@ -705,35 +709,53 @@ def render_home() -> HTMLResponse:
 
 def render_agents_page(agents: List[AgentMetadata]) -> HTMLResponse:
     agents_json = json.dumps([a.dict() for a in agents])
-    script = f"""
-          const initialAgents = {agents_json};
-          const App = () => {{
+    script_template = """
+          const initialAgents = __AGENTS_JSON__;
+          const App = () => {
+            const orbitPositions = React.useMemo(() => {
+              const rings = [28, 36, 44, 52];
+              const items = [];
+              const count = Math.max(initialAgents.length, 8);
+              initialAgents.forEach((agent, i) => {
+                const ringIndex = i % rings.length;
+                const angle = (i * (360 / count)) % 360;
+                const r = rings[ringIndex];
+                const x = 50 + Math.cos(angle * Math.PI/180) * r;
+                const y = 50 + Math.sin(angle * Math.PI/180) * r;
+                const clampedX = Math.min(94, Math.max(6, x));
+                const clampedY = Math.min(94, Math.max(6, y));
+                items.push({ agent, style: { left: `${clampedX}%`, top: `${clampedY}%` } });
+              });
+              return items;
+            }, []);
+
             return (
               <div className="panel">
                 <div className="hero">
                   <div className="badge">Registry</div>
                   <div>
                     <h1 style={{ margin: '4px 0 6px' }}>Available Worker Agents</h1>
-                    <p className="small">These agents are registered and available for the supervisor to call.</p>
+                    <p className="small">Visualized in orbit around the supervisor. Hover to see details.</p>
                   </div>
                 </div>
-                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
-                  {{initialAgents.map(agent => (
-                    <PlanetCard
-                      key={{agent.name}}
-                      agent={{agent}}
-                      style={{{{ position: 'relative', width: '100%', transform: 'none' }}}}
-                    />
-                  ))}}
+                <div className="orbit" style={{ height: 520 }}>
+                  <div className="sun">Supervisor</div>
+                  <div className="ring r1"></div>
+                  <div className="ring r2"></div>
+                  <div className="ring r3"></div>
+                  {orbitPositions.map(({ agent, style }) => (
+                    <PlanetCard key={agent.name} agent={agent} style={{ position: 'absolute', transform: 'translate(-50%, -50%)', ...style }} />
+                  ))}
                 </div>
                 <footer style={{ marginTop: 40 }}>
                   <a href="/" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>← Back to Dashboard</a>
                 </footer>
               </div>
             );
-          }};
+          };
           ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     """
+    script = script_template.replace("__AGENTS_JSON__", agents_json)
     return _render_page("Agents - Supervisor", script)
 
 def render_query_page() -> HTMLResponse:

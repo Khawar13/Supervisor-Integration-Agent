@@ -66,7 +66,7 @@ def load_registry() -> List[AgentMetadata]:
         AgentMetadata(
             name="KnowledgeBaseBuilderAgent",
             description="Creates and manages tasks from plain English input. Uses LLM to parse task information (task_id, task_name, task_description, task_deadline) from any input format and stores tasks in MongoDB with default status 'todo'.",
-            intents=["create_task"],
+            intents=["create_task", "add_task", "task.create", "task.add"],
             type="http",
             endpoint="http://vps.zaim-abbasi.tech/knowledge-builder/message",
             healthcheck="http://vps.zaim-abbasi.tech/knowledge-builder/health",
